@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without
 * modification, are permitted provided that the following conditions are
@@ -10,7 +10,7 @@
 *      copyright notice, this list of conditions and the following
 *      disclaimer in the documentation and/or other materials provided
 *      with the distribution.
-*    * Neither the name of Code Aurora Forum, Inc. nor the names of its
+*    * Neither the name of The Linux Foundation nor the names of its
 *      contributors may be used to endorse or promote products derived
 *      from this software without specific prior written permission.
 *
@@ -35,9 +35,7 @@
 #include "fb_priv.h"
 #include "overlayUtils.h"
 #include "mdpWrapper.h"
-
-#define MDP4_REV40_UP_SCALING_MAX 8
-#define MDP4_REV41_OR_LATER_UP_SCALING_MAX 20
+#include "mdp_version.h"
 
 // just a helper static thingy
 namespace {
@@ -86,6 +84,10 @@ const char* const Res::barrierFile =
 
 
 namespace utils {
+//------------------ defines -----------------------------
+#define FB_DEVICE_TEMPLATE "/dev/graphics/fb%u"
+#define NUM_FB_DEVICES 3
+
 //--------------------------------------------------------
 FrameBufferInfo::FrameBufferInfo() {
     mFBWidth = 0;
@@ -112,21 +114,26 @@ FrameBufferInfo::FrameBufferInfo() {
         return;
     }
 
-    mdp_overlay ov;
-    memset(&ov, 0, sizeof(ov));
-    ov.id = 1;
-    if (!mdp_wrapper::getOverlay(mFd.getFD(), ov)) {
-        ALOGE("FrameBufferInfo: failed getOverlay on fb0");
-        mFd.close();
-        return;
+    int mdpVersion = qdutils::MDPVersion::getInstance().getMDPVersion();
+    if (mdpVersion < qdutils::MDSS_V5) {
+        mdp_overlay ov;
+        memset(&ov, 0, sizeof(ov));
+        ov.id = 1;
+        if (!mdp_wrapper::getOverlay(mFd.getFD(), ov)) {
+            ALOGE("FrameBufferInfo: failed getOverlay on fb0");
+            mFd.close();
+            return;
+        }
+        mBorderFillSupported = (ov.flags & MDP_BORDERFILL_SUPPORTED) ?
+                               true : false;
+    } else {
+        // badger always support border fill
+        mBorderFillSupported = true;
     }
 
     mFd.close();
-
     mFBWidth = vinfo.xres;
     mFBHeight = vinfo.yres;
-    mBorderFillSupported = (ov.flags & MDP_BORDERFILL_SUPPORTED) ?
-            true : false;
 }
 
 FrameBufferInfo* FrameBufferInfo::getInstance() {
@@ -144,34 +151,26 @@ int FrameBufferInfo::getHeight() const {
     return mFBHeight;
 }
 
-bool FrameBufferInfo::supportTrueMirroring() const {
-    char value[PROPERTY_VALUE_MAX] = {0};
-    property_get("hw.trueMirrorSupported", value, "0");
-    int trueMirroringSupported = atoi(value);
-    return (trueMirroringSupported && mBorderFillSupported);
-}
-
 /* clears any VG pipes allocated to the fb devices */
 int initOverlay() {
     msmfb_mixer_info_req  req;
     mdp_mixer_info *minfo = NULL;
-    char fb_dev_name[PATH_MAX];
+    char name[64];
     int fd = -1;
-    // loop upto FB_MAX devices
-    for(int i = 0; i < FB_MAX; i++) {
-        snprintf(fb_dev_name, PATH_MAX, Res::fbPath, i);
-        ALOGD("initoverlay:: opening the device:: %s", fb_dev_name);
-        fd = ::open(fb_dev_name, O_RDWR, 0);
+    for(int i = 0; i < NUM_FB_DEVICES; i++) {
+        snprintf(name, 64, FB_DEVICE_TEMPLATE, i);
+        ALOGD("initoverlay:: opening the device:: %s", name);
+        fd = ::open(name, O_RDWR, 0);
         if(fd < 0) {
-            // break out of this loop when there is no framebuffer node exists
-            break;
+            ALOGE("cannot open framebuffer(%d)", i);
+            return -1;
         }
         //Get the mixer configuration */
         req.mixer_num = i;
         if (ioctl(fd, MSMFB_MIXER_INFO, &req) == -1) {
             ALOGE("ERROR: MSMFB_MIXER_INFO ioctl failed");
             close(fd);
-            continue;
+            return -1;
         }
         minfo = req.info;
         for (int j = 0; j < req.cnt; j++) {
@@ -245,28 +244,6 @@ int getMdpFormat(int format) {
     }
     // not reached
     return -1;
-}
-
-int getOverlayMagnificationLimit()
-{
-    if(qdutils::MDPVersion::getInstance().getMDPVersion() > 400)
-       return MDP4_REV41_OR_LATER_UP_SCALING_MAX;
-    else
-       return MDP4_REV40_UP_SCALING_MAX;
-}
-
-//Set by client as HDMI/WFD
-void setExtType(const int& type) {
-    if(type != HDMI && type != WFD) {
-        ALOGE("%s: Unrecognized type %d", __func__, type);
-        return;
-    }
-    sExtType = type;
-}
-
-//Return External panel type set by client.
-int getExtType() {
-    return sExtType;
 }
 
 bool is3DTV() {

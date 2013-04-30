@@ -141,15 +141,10 @@ public:
     /* dump state of the object */
     void dump() const;
 
-    /* Perform transformation calculations */
-    void doTransform();
-
-    /* Performs downscale calculations */
-    int doDownscale();
-
 private:
 
     /* helper functions for overlayTransform */
+    void doTransform();
     void overlayTransFlipH();
     void overlayTransFlipV();
     void overlayTransRot90();
@@ -238,13 +233,6 @@ private:
 };
 
 //--------------Inlines---------------------------------
-namespace utils {
-inline bool openDev(OvFD& fd, int fbnum,
-        const char* const devpath,
-        int flags) {
-    return overlay::open(fd, fbnum, devpath, flags);
-}
-}
 namespace {
 // just a helper func for common operations x-(y+z)
 int compute(uint32_t x, uint32_t y, uint32_t z) {
@@ -338,10 +326,6 @@ inline void MdpCtrl::setSrcRectDim(const overlay::utils::Dim d) {
     mOVInfo.src_rect.y = d.y;
     mOVInfo.src_rect.w = d.w;
     mOVInfo.src_rect.h = d.h;
-    utils::even_ceil(mOVInfo.src_rect.x);
-    utils::even_ceil(mOVInfo.src_rect.y);
-    utils::even_floor(mOVInfo.src_rect.w);
-    utils::even_floor(mOVInfo.src_rect.h);
 }
 
 inline overlay::utils::Dim MdpCtrl::getDstRectDim() const {
@@ -356,10 +340,6 @@ inline void MdpCtrl::setDstRectDim(const overlay::utils::Dim d) {
     mOVInfo.dst_rect.y = d.y;
     mOVInfo.dst_rect.w = d.w;
     mOVInfo.dst_rect.h = d.h;
-    utils::even_ceil(mOVInfo.dst_rect.x);
-    utils::even_ceil(mOVInfo.dst_rect.y);
-    utils::even_floor(mOVInfo.dst_rect.w);
-    utils::even_floor(mOVInfo.dst_rect.h);
 }
 
 inline int MdpCtrl::getUserData() const { return mOVInfo.user_data[0]; }

@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2010 The Android Open Source Project
- * Copyright (C) 2012, Code Aurora Forum. All rights reserved.
+ * Copyright (C) 2012, The Linux Foundation. All rights reserved.
  *
  * Not a Contribution, Apache license notifications and license are
  * retained for attribution purposes only.
@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#define DEBUG 0
+#define UEVENT_DEBUG 0
 #include <hardware_legacy/uevent.h>
 #include <utils/Log.h>
 #include <sys/resource.h>
@@ -25,43 +25,52 @@
 #include <string.h>
 #include <stdlib.h>
 #include "hwc_utils.h"
-#include "hwc_external.h"
-
-#define PAGE_SIZE 4096
+#include "external.h"
 
 namespace qhwc {
+
+#define HWC_UEVENT_THREAD_NAME "hwcUeventThread"
+
+const char* MSMFB_HDMI_NODE = "fb1";
 
 static void handle_uevent(hwc_context_t* ctx, const char* udata, int len)
 {
     int vsync = 0;
+    char* hdmi;
     int64_t timestamp = 0;
     const char *str = udata;
 
     if(!strcasestr(str, "@/devices/virtual/graphics/fb")) {
-        ALOGD_IF(DEBUG, "%s: Not Ext Disp Event ", __FUNCTION__);
+        ALOGD_IF(UEVENT_DEBUG, "%s: Not Ext Disp Event ", __FUNCTION__);
         return;
     }
-
+    hdmi = strcasestr(str, MSMFB_HDMI_NODE);
     // parse HDMI events
     // The event will be of the form:
     // change@/devices/virtual/graphics/fb1 ACTION=change
     // DEVPATH=/devices/virtual/graphics/fb1
     // SUBSYSTEM=graphics HDCP_STATE=FAIL MAJOR=29
     // for now just parsing onlin/offline info is enough
-    str = udata;
-    if(!(strncmp(str,"online@",strlen("online@")))) {
-        strncpy(ctx->mHDMIEvent,str,strlen(str));
-        ctx->hdmi_pending = true;
-        //Invalidate
-        hwc_procs* proc = (hwc_procs*)ctx->device.reserved_proc[0];
-        if(!proc) {
-            ALOGE("%s: HWC proc not registered", __FUNCTION__);
-        } else {
-            proc->invalidate(proc);
+    if (hdmi) {
+        str = udata;
+        int connected = -1; //some event other than online and offline .. e.g
+        if(!(strncmp(str,"online@",strlen("online@")))) {
+            //Disabled until SF calls unblank
+            ctx->dpyAttr[HWC_DISPLAY_EXTERNAL].isActive = false;
+            connected = 1;
+        } else if(!(strncmp(str,"offline@",strlen("offline@")))) {
+            //Disabled until SF calls unblank
+            ctx->dpyAttr[HWC_DISPLAY_EXTERNAL].isActive = false;
+            connected = 0;
         }
-    } else if(!(strncmp(str,"offline@",strlen("offline@")))) {
-        ctx->hdmi_pending = false;
-        ctx->mExtDisplay->processUEventOffline(str);
+        if(connected != -1) { //either we got online or offline
+            ctx->dpyAttr[HWC_DISPLAY_EXTERNAL].connected = connected;
+            ctx->mExtDisplay->setExternalDisplay(connected);
+            ALOGD("%s sending hotplug: connected = %d", __FUNCTION__,connected);
+            Locker::Autolock _l(ctx->mExtSetLock); //hwc comp could be on
+            //TODO ideally should be done on "connected" not "online"
+            ctx->proc->hotplug(ctx->proc, HWC_DISPLAY_EXTERNAL, connected);
+        }
     }
 }
 
@@ -70,8 +79,7 @@ static void *uevent_loop(void *param)
     int len = 0;
     static char udata[PAGE_SIZE];
     hwc_context_t * ctx = reinterpret_cast<hwc_context_t *>(param);
-
-    char thread_name[64] = "hwcUeventThread";
+    char thread_name[64] = HWC_UEVENT_THREAD_NAME;
     prctl(PR_SET_NAME, (unsigned long) &thread_name, 0, 0, 0);
     setpriority(PRIO_PROCESS, 0, HAL_PRIORITY_URGENT_DISPLAY);
     uevent_init();
@@ -87,8 +95,14 @@ static void *uevent_loop(void *param)
 void init_uevent_thread(hwc_context_t* ctx)
 {
     pthread_t uevent_thread;
-    ALOGI("Initializing UEvent Listener Thread");
-    pthread_create(&uevent_thread, NULL, uevent_loop, (void*) ctx);
+    int ret;
+
+    ALOGI("Initializing UEVENT Thread");
+    ret = pthread_create(&uevent_thread, NULL, uevent_loop, (void*) ctx);
+    if (ret) {
+        ALOGE("%s: failed to create %s: %s", __FUNCTION__,
+            HWC_UEVENT_THREAD_NAME, strerror(ret));
+    }
 }
 
 }; //namespace

@@ -132,7 +132,6 @@ static int get_format(int format) {
         case HAL_PIXEL_FORMAT_YCbCr_422_SP:  return MDP_Y_CRCB_H2V1;
         case HAL_PIXEL_FORMAT_YCbCr_420_SP:  return MDP_Y_CRCB_H2V2;
         case HAL_PIXEL_FORMAT_YCrCb_420_SP_ADRENO: return MDP_Y_CBCR_H2V2_ADRENO;
-        case HAL_PIXEL_FORMAT_NV12_ENCODEABLE: return MDP_Y_CBCR_H2V2;
     }
     return -1;
 }
@@ -407,8 +406,8 @@ static int stretch_copybit(
             }
         }
 
-        if (src_rect->l < 0 || (uint32_t)src_rect->r > src->w ||
-            src_rect->t < 0 || (uint32_t)src_rect->b > src->h) {
+        if (src_rect->l < 0 || src_rect->r > (int)src->w ||
+            src_rect->t < 0 || src_rect->b > (int)src->h) {
             // this is always invalid
             ALOGE ("%s : Invalid source rectangle : src_rect l %d t %d r %d b %d",\
                    __FUNCTION__, src_rect->l, src_rect->t, src_rect->r, src_rect->b);
@@ -427,8 +426,7 @@ static int stretch_copybit(
         }
 
         if(src->format ==  HAL_PIXEL_FORMAT_YV12) {
-            int usage = GRALLOC_USAGE_PRIVATE_ADSP_HEAP |
-                GRALLOC_USAGE_PRIVATE_MM_HEAP;
+            int usage = GRALLOC_USAGE_PRIVATE_MM_HEAP;
             if (0 == alloc_buffer(&yv12_handle,src->w,src->h,
                                   src->format, usage)){
                 if(0 == convertYV12toYCrCb420SP(src,yv12_handle)){
